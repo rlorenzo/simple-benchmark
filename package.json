@@ -1,0 +1,30 @@
+{
+  "name": "benchmarking",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha",
+    "prepare": "husky install",
+    "lint": "eslint . && markdownlint-cli *.md",
+    "lint:fix": "eslint . --fix && markdownlint-cli *.md --fix"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "fs-extra": "^11.3.0",
+    "playwright": "^1.53.2"
+  },
+  "devDependencies": {
+    "eslint": "^9.30.0",
+    "eslint-config-prettier": "^10.1.5",
+    "eslint-plugin-prettier": "^5.5.1",
+    "express": "^5.1.0",
+    "husky": "^9.1.7",
+    "markdownlint-cli": "^0.45.0",
+    "mocha": "^11.7.1",
+    "prettier": "^3.6.2"
+  }
+}

@@ -1,0 +1,11 @@
+# Benchmark results
+results-*.html
+
+# Local links file
+links.txt
+
+# Node modules
+node_modules
+
+# Misc files
+.DS_Store
