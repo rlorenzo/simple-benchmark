@@ -5,7 +5,7 @@ load time and page size for a list of URLs.
 
 ## How to Use
 
-1.  **Create a `links.txt` file:**
+1. **Create a `links.txt` file:**
 
     Create a file named `links.txt` in the root of the project. This file
     should contain a list of URLs to benchmark, with one URL per line. Each
@@ -21,13 +21,13 @@ load time and page size for a list of URLs.
     If you don't create a `links.txt` file, the script will use the sample
     `links.txt.dist` file as a fallback.
 
-2.  **Install dependencies:**
+2. **Install dependencies:**
 
     ```bash
     npm install
     ```
 
-3.  **Run the benchmark:**
+3. **Run the benchmark:**
 
     ```bash
     node benchmark.js

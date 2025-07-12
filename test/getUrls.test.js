@@ -6,7 +6,6 @@ const { getUrls } = require('../benchmark.js');
 describe('getUrls', () => {
   const testDir = path.join(__dirname, 'temp-getUrls');
   const linksTxtPath = path.join(testDir, 'links.txt');
-  const linksDistPath = path.join(testDir, 'links.txt.dist');
 
   beforeEach(async () => {
     await fs.ensureDir(testDir);
@@ -20,7 +19,9 @@ describe('getUrls', () => {
     await fs.writeFile(linksTxtPath, 'Test Page,http://test.com');
 
     const urls = await getUrls(testDir);
-    assert.deepStrictEqual(urls, [{ name: 'Test Page', url: 'http://test.com' }]);
+    assert.deepStrictEqual(urls, [
+      { name: 'Test Page', url: 'http://test.com' },
+    ]);
   });
 
   it('should throw an error if links.txt does not exist', async () => {

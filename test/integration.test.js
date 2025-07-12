@@ -43,12 +43,41 @@ describe('Integration Test', () => {
 
     // Verify that an HTML report was generated
     const files = await fs.readdir(tempDir);
-    const reportFile = files.find((file) => file.startsWith('results-') && file.endsWith('.html'));
+    const reportFile = files.find(
+      (file) => file.startsWith('results-') && file.endsWith('.html'),
+    );
     assert.ok(reportFile, 'HTML report file was not generated.');
 
     // Optionally, read the report content and assert its structure
-    const reportContent = await fs.readFile(path.join(tempDir, reportFile), 'utf-8');
-    assert.ok(reportContent.includes('Website Performance Benchmark Results'), 'Report content is missing expected title.');
-    assert.ok(reportContent.includes(serverUrl), 'Report content is missing the benchmarked URL.');
+    const reportContent = await fs.readFile(
+      path.join(tempDir, reportFile),
+      'utf-8',
+    );
+    assert.ok(
+      reportContent.includes('Website Performance Benchmark Results'),
+      'Report content is missing expected title.',
+    );
+    assert.ok(
+      reportContent.includes(serverUrl),
+      'Report content is missing the benchmarked URL.',
+    );
+
+    // Verify CSS and JS size columns are present in the report
+    assert.ok(
+      reportContent.includes('CSS Size (avg &plusmn; std dev)'),
+      'Report should contain CSS size column header',
+    );
+    assert.ok(
+      reportContent.includes('JS Size (avg &plusmn; std dev)'),
+      'Report should contain JS size column header',
+    );
+
+    // Verify that the report contains CSS and JS size data (should be > 0 since we serve CSS/JS)
+    const cssPattern = /(\d+\.\d+) KB &plusmn; \d+\.\d+/g;
+    const matches = reportContent.match(cssPattern);
+    assert.ok(
+      matches && matches.length >= 2,
+      'Report should contain CSS and JS size measurements',
+    );
   }).timeout(20000); // Increase timeout for integration test
 });

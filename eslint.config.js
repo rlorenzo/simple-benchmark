@@ -15,4 +15,12 @@ module.exports = [
       sourceType: 'commonjs',
     },
   },
+  {
+    files: ['test/**/*.js'],
+    languageOptions: {
+      globals: {
+        ...globals.mocha,
+      },
+    },
+  },
 ];

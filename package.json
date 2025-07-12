@@ -6,8 +6,8 @@
   "scripts": {
     "test": "mocha",
     "prepare": "husky install",
-    "lint": "eslint . && markdownlint-cli *.md",
-    "lint:fix": "eslint . --fix && markdownlint-cli *.md --fix"
+    "lint": "eslint . && npx markdownlint-cli *.md",
+    "lint:fix": "eslint . --fix && npx markdownlint-cli *.md --fix"
   },
   "keywords": [],
   "author": "",

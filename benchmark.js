@@ -11,11 +11,12 @@ const NUM_RUNS = 3;
  */
 async function getUrls(directory = __dirname) {
   const linksPath = path.join(directory, 'links.txt');
-  const linksDistPath = path.join(directory, 'links.txt.dist');
   let sourcePath = linksPath;
 
   if (!(await fs.exists(linksPath))) {
-    throw new Error(`links.txt not found at ${linksPath}. Please create this file with your benchmark URLs.`);
+    throw new Error(
+      `links.txt not found at ${linksPath}. Please create this file with your benchmark URLs.`,
+    );
   }
   // If links.txt exists, always use it.
   sourcePath = linksPath;
@@ -39,17 +40,44 @@ async function getUrls(directory = __dirname) {
  * Measures the load time and page size of a given URL.
  * @param {import('playwright').Page} page The Playwright page object.
  * @param {string} url The URL to measure.
- * @returns {Promise<{pageLoadTime: number, pageSize: number}>} A promise that resolves to an object containing the page load time and page size.
+ * @returns {Promise<{pageLoadTime: number, pageSize: number, cssSize: number, jsSize: number}>} A promise that resolves to an object containing the page load time and asset sizes.
  */
 async function measurePage(page, url) {
   let pageLoadTime = 0;
   let pageSize = 0;
+  let cssSize = 0;
+  let jsSize = 0;
 
   const client = await page.context().newCDPSession(page);
   await client.send('Network.enable');
   let currentRunTotalSize = 0;
+  let currentRunCssSize = 0;
+  let currentRunJsSize = 0;
+
+  const responseMap = new Map();
+
+  client.on('Network.responseReceived', (event) => {
+    responseMap.set(event.requestId, event.response);
+  });
+
   client.on('Network.dataReceived', (event) => {
     currentRunTotalSize += event.dataLength;
+
+    const response = responseMap.get(event.requestId);
+    if (response) {
+      const url = response.url;
+      const mimeType = response.mimeType || '';
+
+      if (mimeType.includes('text/css') || url.endsWith('.css')) {
+        currentRunCssSize += event.dataLength;
+      } else if (
+        mimeType.includes('javascript') ||
+        mimeType.includes('application/javascript') ||
+        url.endsWith('.js')
+      ) {
+        currentRunJsSize += event.dataLength;
+      }
+    }
   });
 
   await page.goto(url, { waitUntil: 'networkidle' });
@@ -63,8 +91,10 @@ async function measurePage(page, url) {
 
   pageLoadTime = timing.load;
   pageSize = currentRunTotalSize / 1024; // in KB
+  cssSize = currentRunCssSize / 1024; // in KB
+  jsSize = currentRunJsSize / 1024; // in KB
 
-  return { pageLoadTime, pageSize };
+  return { pageLoadTime, pageSize, cssSize, jsSize };
 }
 
 /**
@@ -78,14 +108,21 @@ async function benchmarkUrl(browser, name, url) {
   console.log(`Benchmarking: ${name} (${url})...`);
   const loadTimes = [];
   const pageSizes = [];
+  const cssSizes = [];
+  const jsSizes = [];
 
   for (let i = 1; i <= NUM_RUNS; i++) {
     console.log(`  Run ${i}/${NUM_RUNS}`);
     const page = await browser.newPage();
     try {
-      const { pageLoadTime, pageSize } = await measurePage(page, url);
+      const { pageLoadTime, pageSize, cssSize, jsSize } = await measurePage(
+        page,
+        url,
+      );
       loadTimes.push(pageLoadTime);
       pageSizes.push(pageSize);
+      cssSizes.push(cssSize);
+      jsSizes.push(jsSize);
     } catch (error) {
       console.error(`  Error during run ${i} for ${name} (${url}):`, error);
     } finally {
@@ -93,7 +130,7 @@ async function benchmarkUrl(browser, name, url) {
     }
   }
 
-  return calculateStats(loadTimes, pageSizes);
+  return calculateStats(loadTimes, pageSizes, cssSizes, jsSizes);
 }
 
 /**
@@ -120,17 +157,25 @@ function calculateRunStats(data) {
  * Calculates the statistics for the load times and page sizes.
  * @param {Array<number>} loadTimes An array of page load times.
  * @param {Array<number>} pageSizes An array of page sizes.
+ * @param {Array<number>} cssSizes An array of CSS file sizes.
+ * @param {Array<number>} jsSizes An array of JavaScript file sizes.
  * @returns {object} An object containing the calculated statistics.
  */
-function calculateStats(loadTimes, pageSizes) {
+function calculateStats(loadTimes, pageSizes, cssSizes, jsSizes) {
   const loadTimeStats = calculateRunStats(loadTimes);
   const pageSizeStats = calculateRunStats(pageSizes);
+  const cssSizeStats = calculateRunStats(cssSizes);
+  const jsSizeStats = calculateRunStats(jsSizes);
 
   return {
     avgLoadTime: loadTimeStats.avg,
     stdDevLoadTime: loadTimeStats.stdDev,
     avgPageSize: pageSizeStats.avg,
     stdDevPageSize: pageSizeStats.stdDev,
+    avgCssSize: cssSizeStats.avg,
+    stdDevCssSize: cssSizeStats.stdDev,
+    avgJsSize: jsSizeStats.avg,
+    stdDevJsSize: jsSizeStats.stdDev,
   };
 }
 
@@ -147,6 +192,8 @@ function generateHtmlReport(results) {
             <td><a href="${result.url}" target="_blank">${result.name}</a></td>
             <td>${result.avgLoadTime} ms &plusmn; ${result.stdDevLoadTime}</td>
             <td>${result.avgPageSize} KB &plusmn; ${result.stdDevPageSize}</td>
+            <td>${result.avgCssSize} KB &plusmn; ${result.stdDevCssSize}</td>
+            <td>${result.avgJsSize} KB &plusmn; ${result.stdDevJsSize}</td>
         </tr>
     `,
     )
@@ -182,6 +229,8 @@ function generateHtmlReport(results) {
                         <th>Page</th>
                         <th>Load Time (avg &plusmn; std dev)</th>
                         <th>Page Size (avg &plusmn; std dev)</th>
+                        <th>CSS Size (avg &plusmn; std dev)</th>
+                        <th>JS Size (avg &plusmn; std dev)</th>
                     </tr>
                 </thead>
                 <tbody>
