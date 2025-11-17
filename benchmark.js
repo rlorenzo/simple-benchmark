@@ -3,37 +3,31 @@ const fs = require('fs-extra');
 const path = require('path');
 
 const NUM_RUNS = 3;
+const BYTES_PER_KB = 1024;
 
 /**
  * Reads the list of URLs to benchmark from a file.
- * It first tries to read from `links.txt`, and if that doesn't exist, it falls back to `links.txt.dist`.
+ * @param {string} directory - The directory containing links.txt
  * @returns {Promise<Array<{name: string, url: string}>>} A promise that resolves to an array of URL objects.
+ * @throws {Error} If links.txt does not exist or cannot be read.
  */
 async function getUrls(directory = __dirname) {
   const linksPath = path.join(directory, 'links.txt');
-  let sourcePath = linksPath;
 
   if (!(await fs.exists(linksPath))) {
     throw new Error(
       `links.txt not found at ${linksPath}. Please create this file with your benchmark URLs.`,
     );
   }
-  // If links.txt exists, always use it.
-  sourcePath = linksPath;
 
-  try {
-    const linksFile = await fs.readFile(sourcePath, 'utf-8');
-    return linksFile
-      .split('\n')
-      .map((line) => {
-        const [name, url] = line.split(',');
-        return { name, url };
-      })
-      .filter((item) => item.name && item.url);
-  } catch (error) {
-    console.error(`Error reading URLs from ${sourcePath}:`, error);
-    return [];
-  }
+  const linksFile = await fs.readFile(linksPath, 'utf-8');
+  return linksFile
+    .split('\n')
+    .map((line) => {
+      const [name, url] = line.split(',');
+      return { name, url };
+    })
+    .filter((item) => item.name && item.url);
 }
 
 /**
@@ -43,17 +37,12 @@ async function getUrls(directory = __dirname) {
  * @returns {Promise<{pageLoadTime: number, pageSize: number, cssSize: number, jsSize: number}>} A promise that resolves to an object containing the page load time and asset sizes.
  */
 async function measurePage(page, url) {
-  let pageLoadTime = 0;
-  let pageSize = 0;
-  let cssSize = 0;
-  let jsSize = 0;
-
   const client = await page.context().newCDPSession(page);
   await client.send('Network.enable');
-  let currentRunTotalSize = 0;
-  let currentRunCssSize = 0;
-  let currentRunJsSize = 0;
 
+  let totalSize = 0;
+  let cssSize = 0;
+  let jsSize = 0;
   const responseMap = new Map();
 
   client.on('Network.responseReceived', (event) => {
@@ -61,21 +50,20 @@ async function measurePage(page, url) {
   });
 
   client.on('Network.dataReceived', (event) => {
-    currentRunTotalSize += event.dataLength;
+    totalSize += event.dataLength;
 
     const response = responseMap.get(event.requestId);
     if (response) {
-      const url = response.url;
+      const responseUrl = response.url;
       const mimeType = response.mimeType || '';
 
-      if (mimeType.includes('text/css') || url.endsWith('.css')) {
-        currentRunCssSize += event.dataLength;
+      if (mimeType.includes('text/css') || responseUrl.endsWith('.css')) {
+        cssSize += event.dataLength;
       } else if (
         mimeType.includes('javascript') ||
-        mimeType.includes('application/javascript') ||
-        url.endsWith('.js')
+        responseUrl.endsWith('.js')
       ) {
-        currentRunJsSize += event.dataLength;
+        jsSize += event.dataLength;
       }
     }
   });
@@ -89,12 +77,12 @@ async function measurePage(page, url) {
     };
   });
 
-  pageLoadTime = timing.load;
-  pageSize = currentRunTotalSize / 1024; // in KB
-  cssSize = currentRunCssSize / 1024; // in KB
-  jsSize = currentRunJsSize / 1024; // in KB
-
-  return { pageLoadTime, pageSize, cssSize, jsSize };
+  return {
+    pageLoadTime: timing.load,
+    pageSize: totalSize / BYTES_PER_KB,
+    cssSize: cssSize / BYTES_PER_KB,
+    jsSize: jsSize / BYTES_PER_KB,
+  };
 }
 
 /**
