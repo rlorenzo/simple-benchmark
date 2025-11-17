@@ -9,7 +9,7 @@ const BYTES_PER_KB = 1024;
  * Reads the list of URLs to benchmark from a file.
  * @param {string} directory - The directory containing links.txt
  * @returns {Promise<Array<{name: string, url: string}>>} A promise that resolves to an array of URL objects.
- * @throws {Error} If links.txt does not exist or cannot be read.
+ * @throws {Error} If links.txt does not exist, cannot be read, or contains invalid data.
  */
 async function getUrls(directory = __dirname) {
   const linksPath = path.join(directory, 'links.txt');
