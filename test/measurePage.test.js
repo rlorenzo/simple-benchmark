@@ -59,23 +59,4 @@ describe('measurePage', () => {
       await page.close();
     }
   }).timeout(10000);
-
-  it('should handle pages with no CSS or JS', async () => {
-    const page = await browser.newPage();
-
-    try {
-      // Navigate to a simple HTML page without CSS/JS
-      await page.setContent('<html><body><h1>Simple Page</h1></body></html>');
-
-      // We can't easily test measurePage with this approach since it expects a URL
-      // and uses CDP. This test would need a different server setup.
-      // For now, we'll just verify the function exists and can be called.
-      assert.ok(
-        typeof measurePage === 'function',
-        'measurePage should be a function',
-      );
-    } finally {
-      await page.close();
-    }
-  });
 });
