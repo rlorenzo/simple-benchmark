@@ -35,6 +35,14 @@ describe('getUrls', () => {
     assert.deepStrictEqual(urls, []);
   });
 
+  it('should trim whitespace and CRLF line endings', async () => {
+    await fs.writeFile(linksTxtPath, 'Test Page , http://test.com \r\n');
+    const urls = await getUrls(testDir);
+    assert.deepStrictEqual(urls, [
+      { name: 'Test Page', url: 'http://test.com' },
+    ]);
+  });
+
   it('should filter out invalid lines', async () => {
     const content = [
       'Valid Page,http://valid.com',

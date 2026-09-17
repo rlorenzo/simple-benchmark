@@ -159,4 +159,85 @@ describe('generateHtmlReport - Core Web Vitals', () => {
       'Report should state the throttling profile',
     );
   });
+
+  it('should flag CLS against Google thresholds', () => {
+    assert.ok(
+      generateHtmlReport([result({ avgCls: '0.05' })]).includes(
+        'td class="good"',
+      ),
+      'CLS at or under 0.1 should be marked good',
+    );
+    assert.ok(
+      generateHtmlReport([result({ avgCls: '0.18' })]).includes(
+        'td class="needs-work"',
+      ),
+      'CLS between 0.1 and 0.25 should be marked as needing work',
+    );
+    assert.ok(
+      generateHtmlReport([result({ avgCls: '0.4' })]).includes(
+        'td class="poor"',
+      ),
+      'CLS over 0.25 should be marked poor',
+    );
+    assert.ok(
+      generateHtmlReport([result({ avgCls: '0' })]).includes('td class="good"'),
+      'A CLS of exactly 0 is a good score, not missing data',
+    );
+  });
+});
+
+describe('generateHtmlReport - escaping', () => {
+  it('should escape a hostile page name instead of injecting it', () => {
+    const html = generateHtmlReport([
+      {
+        name: '<script>alert(1)</script>',
+        url: 'http://example.com',
+        avgLoadTime: '250.00',
+        stdDevLoadTime: '10.00',
+      },
+    ]);
+    assert.ok(
+      !html.includes('<script>alert(1)</script>'),
+      'Report must not contain a live script tag from the page name',
+    );
+    assert.ok(
+      html.includes('&lt;script&gt;alert(1)&lt;/script&gt;'),
+      'Report should contain the escaped page name',
+    );
+  });
+
+  it('should escape a hostile lcpUrl read from the page DOM', () => {
+    const html = generateHtmlReport([
+      {
+        name: 'Test Page',
+        url: 'http://example.com',
+        avgLoadTime: '250.00',
+        stdDevLoadTime: '10.00',
+        lcpUrl: '"><img src=x onerror=alert(3)>',
+      },
+    ]);
+    assert.ok(
+      !html.includes('<img src=x onerror=alert(3)>'),
+      'Report must not contain a live img tag from lcpUrl',
+    );
+    assert.ok(
+      html.includes('&quot;&gt;&lt;img src=x onerror=alert(3)&gt;'),
+      'Report should contain the escaped lcpUrl',
+    );
+  });
+
+  it('should escape a hostile url used in the link href', () => {
+    const html = generateHtmlReport([
+      {
+        name: 'Test Page',
+        url: '"><script>alert(2)</script>',
+        avgLoadTime: '250.00',
+        stdDevLoadTime: '10.00',
+      },
+    ]);
+    assert.ok(
+      !html.includes('"><script>alert(2)</script>'),
+      'Report must not contain a live script tag from the url',
+    );
+  });
 });
