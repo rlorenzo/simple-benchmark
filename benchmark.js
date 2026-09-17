@@ -190,6 +190,10 @@ async function measurePage(page, url, profile) {
   // response like a render-blocking stylesheet it can come out as 0 entirely.
   // loadingFinished reports the final, authoritative encoded size once the
   // request is done, so transfer/css/js totals are taken from there instead.
+  // The trade-off: a request still in flight when the settle window closes, or
+  // one that errors out, never fires loadingFinished and so contributes zero
+  // rather than a partial count. That undercounts a page still loading at the
+  // end of the window, which is the rarer and more visible failure.
   client.on('Network.dataReceived', (event) => {
     decodedSize += event.dataLength;
   });
@@ -225,13 +229,9 @@ async function measurePage(page, url, profile) {
         } else {
           // A text LCP element has no url; the tag name alone ("P", "H1") is
           // useless for finding it on the page, so tack on a text snippet.
-          try {
-            const tag = last.element?.tagName || '';
-            const text = last.element?.textContent?.trim().slice(0, 60) || '';
-            window.__vitals.lcpUrl = text ? `${tag} "${text}"` : tag;
-          } catch {
-            window.__vitals.lcpUrl = last.element?.tagName || '';
-          }
+          const tag = last.element?.tagName || '';
+          const text = last.element?.textContent?.trim().slice(0, 60) || '';
+          window.__vitals.lcpUrl = text ? `${tag} "${text}"` : tag;
         }
       }).observe({ type: 'largest-contentful-paint', buffered: true });
 
@@ -548,7 +548,7 @@ async function main(directory = __dirname) {
   const urls = await getUrls(directory);
   if (urls.length === 0) {
     console.log('No URLs to benchmark. Exiting.');
-    return;
+    return { reportPath: null, failedUrls: [] };
   }
 
   const profiles = getProfiles();
@@ -576,28 +576,34 @@ async function main(directory = __dirname) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const reportPath = path.join(directory, `results-${timestamp}.html`);
 
-  try {
-    await fs.writeFile(reportPath, htmlReport);
-    console.log(`Report saved to ${reportPath}`);
-    console.log('To view the report, open the HTML file in your browser.');
-  } catch (error) {
-    console.error(`Error writing report to ${reportPath}:`, error);
-  }
+  // No catch here on purpose: a returned reportPath has to mean the file is
+  // there. Swallowing the error handed the caller a path to nothing.
+  await fs.writeFile(reportPath, htmlReport);
+  console.log(`Report saved to ${reportPath}`);
+  console.log('To view the report, open the HTML file in your browser.');
 
   // Every run of a URL failing (bad link, site down) is not the same as one
   // flaky run - the per-run catch in benchmarkUrl already absorbs those. The
-  // report above still gets written so what did succeed isn't lost, but the
-  // process must not exit 0 and claim a clean benchmark.
+  // report above still gets written so what did succeed isn't lost, but this
+  // is an expected outcome the caller has to see, not a crash: returning it
+  // lets the CLI exit non-zero without a library caller having to parse an
+  // error message to tell "some sites are down" from "the tool broke".
   if (failedUrls.length > 0) {
-    throw new Error(`No successful runs for: ${failedUrls.join(', ')}`);
+    console.error(`No successful runs for: ${failedUrls.join(', ')}`);
   }
+
+  return { reportPath, failedUrls };
 }
 
 if (require.main === module) {
-  main(__dirname).catch((error) => {
-    console.error('An unexpected error occurred:', error);
-    process.exit(1);
-  });
+  main(__dirname)
+    .then(({ failedUrls }) => {
+      if (failedUrls.length > 0) process.exit(1);
+    })
+    .catch((error) => {
+      console.error('An unexpected error occurred:', error);
+      process.exit(1);
+    });
 }
 
 module.exports = {

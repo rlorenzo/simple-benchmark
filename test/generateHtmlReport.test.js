@@ -2,6 +2,28 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const { generateHtmlReport } = require('../benchmark.js');
 
+const result = (overrides) => ({
+  name: 'Test Page',
+  url: 'http://example.com',
+  avgLoadTime: '250.00',
+  stdDevLoadTime: '10.00',
+  avgLcp: '1800.00',
+  stdDevLcp: '50.00',
+  avgFcp: '600.00',
+  stdDevFcp: '20.00',
+  avgCls: '0.0100',
+  avgTtfb: '120.00',
+  stdDevTtfb: '5.00',
+  avgPageSize: '150.00',
+  stdDevPageSize: '5.00',
+  avgDecodedSize: '400.00',
+  avgCssSize: '25.00',
+  stdDevCssSize: '2.00',
+  avgJsSize: '75.00',
+  stdDevJsSize: '8.00',
+  ...overrides,
+});
+
 describe('generateHtmlReport', () => {
   it('should include CSS and JS size columns in the HTML report', () => {
     const mockResults = [
@@ -77,28 +99,6 @@ describe('generateHtmlReport', () => {
 });
 
 describe('generateHtmlReport - Core Web Vitals', () => {
-  const result = (overrides) => ({
-    name: 'Test Page',
-    url: 'http://example.com',
-    avgLoadTime: '250.00',
-    stdDevLoadTime: '10.00',
-    avgLcp: '1800.00',
-    stdDevLcp: '50.00',
-    avgFcp: '600.00',
-    stdDevFcp: '20.00',
-    avgCls: '0.0100',
-    avgTtfb: '120.00',
-    stdDevTtfb: '5.00',
-    avgPageSize: '150.00',
-    stdDevPageSize: '5.00',
-    avgDecodedSize: '400.00',
-    avgCssSize: '25.00',
-    stdDevCssSize: '2.00',
-    avgJsSize: '75.00',
-    stdDevJsSize: '8.00',
-    ...overrides,
-  });
-
   it('should render the vitals columns and their data', () => {
     const html = generateHtmlReport([result()]);
 
@@ -189,12 +189,7 @@ describe('generateHtmlReport - Core Web Vitals', () => {
 describe('generateHtmlReport - escaping', () => {
   it('should escape a hostile page name instead of injecting it', () => {
     const html = generateHtmlReport([
-      {
-        name: '<script>alert(1)</script>',
-        url: 'http://example.com',
-        avgLoadTime: '250.00',
-        stdDevLoadTime: '10.00',
-      },
+      result({ name: '<script>alert(1)</script>' }),
     ]);
     assert.ok(
       !html.includes('<script>alert(1)</script>'),
@@ -208,13 +203,7 @@ describe('generateHtmlReport - escaping', () => {
 
   it('should escape a hostile lcpUrl read from the page DOM', () => {
     const html = generateHtmlReport([
-      {
-        name: 'Test Page',
-        url: 'http://example.com',
-        avgLoadTime: '250.00',
-        stdDevLoadTime: '10.00',
-        lcpUrl: '"><img src=x onerror=alert(3)>',
-      },
+      result({ lcpUrl: '"><img src=x onerror=alert(3)>' }),
     ]);
     assert.ok(
       !html.includes('<img src=x onerror=alert(3)>'),
@@ -228,12 +217,7 @@ describe('generateHtmlReport - escaping', () => {
 
   it('should escape a hostile url used in the link href', () => {
     const html = generateHtmlReport([
-      {
-        name: 'Test Page',
-        url: '"><script>alert(2)</script>',
-        avgLoadTime: '250.00',
-        stdDevLoadTime: '10.00',
-      },
+      result({ url: '"><script>alert(2)</script>' }),
     ]);
     assert.ok(
       !html.includes('"><script>alert(2)</script>'),
