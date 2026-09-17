@@ -1,6 +1,7 @@
-const assert = require('assert');
-const fs = require('fs-extra');
-const path = require('path');
+const { describe, it, before, after } = require('node:test');
+const assert = require('node:assert');
+const fs = require('node:fs/promises');
+const path = require('node:path');
 const { createTestServer } = require('./testServer');
 const { main } = require('../benchmark.js');
 
@@ -26,7 +27,7 @@ describe('Integration Test', () => {
     console.log(`Test server running at ${serverUrl}`);
 
     // Create a temporary directory and links.txt
-    await fs.ensureDir(tempDir);
+    await fs.mkdir(tempDir, { recursive: true });
     await fs.writeFile(linksTxtPath, `Test Page,${serverUrl}`);
 
     // Temporarily change the current working directory for the benchmark script
@@ -49,7 +50,7 @@ describe('Integration Test', () => {
     console.log('Test server stopped.');
 
     // Clean up temporary files
-    await fs.remove(tempDir);
+    await fs.rm(tempDir, { recursive: true, force: true });
 
     // Restore original working directory
     process.chdir(path.join(__dirname, '..'));
@@ -97,5 +98,5 @@ describe('Integration Test', () => {
       matches && matches.length >= 2,
       'Report should contain CSS and JS size measurements',
     );
-  }).timeout(20000); // Increase timeout for integration test
+  });
 });

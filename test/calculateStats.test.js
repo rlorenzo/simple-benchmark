@@ -1,4 +1,5 @@
-const assert = require('assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert');
 const { calculateStats } = require('../benchmark.js');
 
 describe('calculateStats', () => {
