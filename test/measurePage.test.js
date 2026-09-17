@@ -1,4 +1,5 @@
-const assert = require('assert');
+const { describe, it, before, after } = require('node:test');
+const assert = require('node:assert');
 const { chromium } = require('playwright');
 const { measurePage } = require('../benchmark.js');
 const { createTestServer } = require('./testServer');
@@ -58,7 +59,7 @@ describe('measurePage', () => {
     } finally {
       await page.close();
     }
-  }).timeout(10000);
+  });
 });
 
 describe('measurePage - vitals and throttling', () => {
@@ -82,8 +83,7 @@ describe('measurePage - vitals and throttling', () => {
     await new Promise((resolve) => server.close(resolve));
   });
 
-  it('should report Core Web Vitals alongside the load time', async function () {
-    this.timeout(30000);
+  it('should report Core Web Vitals alongside the load time', async () => {
     const page = await browser.newPage();
     try {
       const result = await measurePage(page, serverUrl, FAST_SETTLE);
@@ -101,8 +101,7 @@ describe('measurePage - vitals and throttling', () => {
     }
   });
 
-  it('should report transfer size separately from decoded size', async function () {
-    this.timeout(30000);
+  it('should report transfer size separately from decoded size', async () => {
     const page = await browser.newPage();
     try {
       const result = await measurePage(page, serverUrl, FAST_SETTLE);
@@ -118,8 +117,7 @@ describe('measurePage - vitals and throttling', () => {
     }
   });
 
-  it('should actually slow the page down when a profile is applied', async function () {
-    this.timeout(30000);
+  it('should actually slow the page down when a profile is applied', async () => {
     // The point of the profile is that it changes the measurement. If a
     // throttled run is not measurably slower than an unthrottled one on the
     // same page, the throttling is not being applied and every number the tool

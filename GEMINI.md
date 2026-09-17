@@ -14,13 +14,13 @@ self-contained HTML report.
 
 ## Key Technologies
 
-- **Runtime:** Node.js
-- **Core Logic:** JavaScript (ESM)
+- **Runtime:** Node.js 26 (see `.nvmrc`)
+- **Core Logic:** JavaScript (CommonJS)
 - **Browser Automation:** Playwright (using Chromium)
-- **File System Operations:** `fs-extra`
+- **File System Operations:** `node:fs/promises`
 - **Linting & Formatting:** Biome for JavaScript, `markdownlint-cli` for Markdown.
 - **Git Hooks:** Husky
-- **Testing:** Mocha
+- **Testing:** Node's built-in test runner (`node --test`)
 
 ## File Structure
 

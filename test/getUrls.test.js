@@ -1,6 +1,7 @@
-const assert = require('assert');
-const fs = require('fs-extra');
-const path = require('path');
+const { describe, it, beforeEach, afterEach } = require('node:test');
+const assert = require('node:assert');
+const fs = require('node:fs/promises');
+const path = require('node:path');
 const { getUrls } = require('../benchmark.js');
 
 describe('getUrls', () => {
@@ -8,11 +9,11 @@ describe('getUrls', () => {
   const linksTxtPath = path.join(testDir, 'links.txt');
 
   beforeEach(async () => {
-    await fs.ensureDir(testDir);
+    await fs.mkdir(testDir, { recursive: true });
   });
 
   afterEach(async () => {
-    await fs.remove(testDir);
+    await fs.rm(testDir, { recursive: true, force: true });
   });
 
   it('should read URLs from links.txt if it exists', async () => {

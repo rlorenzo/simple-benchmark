@@ -1,6 +1,7 @@
 const { chromium, devices } = require('playwright');
-const fs = require('fs-extra');
-const path = require('path');
+const fs = require('node:fs/promises');
+const { existsSync } = require('node:fs');
+const path = require('node:path');
 
 const NUM_RUNS = 3;
 const BYTES_PER_KB = 1024;
@@ -125,7 +126,7 @@ function getProfiles(names) {
 async function getUrls(directory = __dirname) {
   const linksPath = path.join(directory, 'links.txt');
 
-  if (!(await fs.exists(linksPath))) {
+  if (!existsSync(linksPath)) {
     throw new Error(
       `links.txt not found at ${linksPath}. Please create this file with your benchmark URLs.`,
     );

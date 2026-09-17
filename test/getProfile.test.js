@@ -1,4 +1,5 @@
-const assert = require('assert');
+const { describe, it, afterEach } = require('node:test');
+const assert = require('node:assert');
 const { getProfile, PROFILES } = require('../benchmark.js');
 
 describe('getProfile', () => {
