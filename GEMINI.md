@@ -18,8 +18,7 @@ self-contained HTML report.
 - **Core Logic:** JavaScript (ESM)
 - **Browser Automation:** Playwright (using Chromium)
 - **File System Operations:** `fs-extra`
-- **Linting:** ESLint for JavaScript, `markdownlint-cli` for Markdown.
-- **Code Formatting:** Prettier
+- **Linting & Formatting:** Biome for JavaScript, `markdownlint-cli` for Markdown.
 - **Git Hooks:** Husky
 - **Testing:** Mocha
 
@@ -39,8 +38,7 @@ self-contained HTML report.
 ├── package-lock.json           # Exact versions of dependencies.
 ├── README.md                   # Instructions for users.
 ├── .gitignore                  # Files and directories to be ignored by git.
-├── eslint.config.js            # ESLint configuration.
-├── .prettierrc.json            # Prettier configuration.
+├── biome.json                  # Biome lint + format configuration.
 └── results-*.html              # The output HTML reports (ignored by git).
 ```
 
@@ -52,12 +50,12 @@ self-contained HTML report.
 
 ## Linting
 
-The project uses ESLint and Prettier for code quality and consistency, and
+The project uses Biome for code quality and formatting, and
 `markdownlint-cli` for Markdown files. Linters are configured to run
 automatically as a pre-commit hook using Husky.
 
-- **Run Linters:** `npx eslint . && npx markdownlint-cli *.md`
-- **Fix Linting Issues:** `npx eslint . --fix && npx markdownlint-cli *.md --fix`
+- **Run Linters:** `npm run lint`
+- **Fix Linting Issues:** `npm run lint:fix`
 
 ## Configuration
 

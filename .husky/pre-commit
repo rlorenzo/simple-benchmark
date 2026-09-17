@@ -1,1 +1,1 @@
-npx eslint . && npx markdownlint-cli *.md
+npx biome check . && npx markdownlint-cli *.md
