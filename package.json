@@ -6,25 +6,22 @@
   "scripts": {
     "test": "mocha",
     "prepare": "husky install",
-    "lint": "eslint . && npx markdownlint-cli *.md",
-    "lint:fix": "eslint . --fix && npx markdownlint-cli *.md --fix"
+    "lint": "biome check . && markdownlint *.md",
+    "lint:fix": "biome check --write . && markdownlint *.md --fix"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "fs-extra": "^11.3.0",
-    "playwright": "^1.53.2"
+    "fs-extra": "^11.4.0",
+    "playwright": "^1.63.0"
   },
   "devDependencies": {
-    "eslint": "^9.30.0",
-    "eslint-config-prettier": "^10.1.5",
-    "eslint-plugin-prettier": "^5.5.1",
-    "express": "^5.1.0",
+    "@biomejs/biome": "2.5.14",
+    "express": "^5.2.1",
     "husky": "^9.1.7",
-    "markdownlint-cli": "^0.45.0",
-    "mocha": "^11.7.1",
-    "prettier": "^3.6.2"
+    "markdownlint-cli": "^0.49.1",
+    "mocha": "^12.0.1"
   }
 }

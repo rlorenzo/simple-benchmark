@@ -1,0 +1,12 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
+  "formatter": { "indentStyle": "space" },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "trailingCommas": "all",
+      "arrowParentheses": "always"
+    },
+    "globals": ["describe", "it", "before", "after", "beforeEach", "afterEach"]
+  }
+}

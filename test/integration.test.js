@@ -10,7 +10,15 @@ describe('Integration Test', () => {
   const tempDir = path.join(__dirname, 'temp-integration');
   const linksTxtPath = path.join(tempDir, 'links.txt');
 
+  // The integration test checks wiring, not performance realism. Left on the
+  // default profile it would throttle to 1.6 Mbps and wait 4s per run for LCP
+  // to settle - about 25s for one URL, to prove only that the pieces connect.
+  const originalProfile = process.env.BENCHMARK_PROFILE;
+  const originalSettle = process.env.BENCHMARK_SETTLE_MS;
+
   before(async () => {
+    process.env.BENCHMARK_PROFILE = 'unthrottled';
+    process.env.BENCHMARK_SETTLE_MS = '100';
     // Start the test server
     server = createTestServer();
     await new Promise((resolve) => server.on('listening', resolve));
@@ -26,6 +34,16 @@ describe('Integration Test', () => {
   });
 
   after(async () => {
+    if (originalProfile === undefined) {
+      delete process.env.BENCHMARK_PROFILE;
+    } else {
+      process.env.BENCHMARK_PROFILE = originalProfile;
+    }
+    if (originalSettle === undefined) {
+      delete process.env.BENCHMARK_SETTLE_MS;
+    } else {
+      process.env.BENCHMARK_SETTLE_MS = originalSettle;
+    }
     // Stop the test server
     await new Promise((resolve) => server.close(resolve));
     console.log('Test server stopped.');
