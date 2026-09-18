@@ -1,4 +1,4 @@
-const { describe, it, before, after } = require('node:test');
+const { describe, it, before, after, mock } = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs/promises');
 const path = require('node:path');
@@ -98,5 +98,67 @@ describe('Integration Test', () => {
       matches && matches.length >= 2,
       'Report should contain CSS and JS size measurements',
     );
+  });
+});
+
+describe('Integration Test - a URL that never loads', () => {
+  const tempDir = path.join(__dirname, 'temp-failed');
+  // Port 1 is privileged and nothing listens there, so every run refuses
+  // immediately rather than waiting out a timeout.
+  const deadUrl = 'http://localhost:1';
+
+  const originalProfile = process.env.BENCHMARK_PROFILE;
+  const originalSettle = process.env.BENCHMARK_SETTLE_MS;
+
+  before(async () => {
+    process.env.BENCHMARK_PROFILE = 'unthrottled';
+    process.env.BENCHMARK_SETTLE_MS = '100';
+    await fs.mkdir(tempDir, { recursive: true });
+    await fs.writeFile(path.join(tempDir, 'links.txt'), `Dead Page,${deadUrl}`);
+  });
+
+  after(async () => {
+    if (originalProfile === undefined) {
+      delete process.env.BENCHMARK_PROFILE;
+    } else {
+      process.env.BENCHMARK_PROFILE = originalProfile;
+    }
+    if (originalSettle === undefined) {
+      delete process.env.BENCHMARK_SETTLE_MS;
+    } else {
+      process.env.BENCHMARK_SETTLE_MS = originalSettle;
+    }
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('should report it as failed instead of claiming a clean run', async () => {
+    // A URL where every run fails is not the same as one flaky run: the
+    // per-run catch in benchmarkUrl absorbs those silently, so without this
+    // the tool would write a report full of N/A and exit 0.
+    const { failedUrls } = await main(tempDir);
+
+    assert.strictEqual(failedUrls.length, 1, 'the dead URL should be reported');
+    assert.ok(
+      failedUrls[0].includes(deadUrl),
+      `failure should name the URL, got: ${failedUrls[0]}`,
+    );
+
+    // The report is still written so whatever did succeed is not lost.
+    const files = await fs.readdir(tempDir);
+    assert.ok(
+      files.some((f) => f.startsWith('results-') && f.endsWith('.html')),
+      'a report should still be written when a URL fails',
+    );
+  });
+
+  it('should reject rather than return a path to a report it failed to write', async () => {
+    mock.method(fs, 'writeFile', () =>
+      Promise.reject(Object.assign(new Error('no space'), { code: 'ENOSPC' })),
+    );
+    try {
+      await assert.rejects(main(tempDir), /no space/);
+    } finally {
+      mock.restoreAll();
+    }
   });
 });

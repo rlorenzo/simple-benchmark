@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "node --test 'test/*.test.js'",
+    "gate": "node gate.js",
     "prepare": "husky install",
     "lint": "biome check . && markdownlint *.md",
     "lint:fix": "biome check --write . && markdownlint *.md --fix"

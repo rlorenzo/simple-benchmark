@@ -2,6 +2,28 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const { generateHtmlReport } = require('../benchmark.js');
 
+const result = (overrides) => ({
+  name: 'Test Page',
+  url: 'http://example.com',
+  avgLoadTime: '250.00',
+  stdDevLoadTime: '10.00',
+  avgLcp: '1800.00',
+  stdDevLcp: '50.00',
+  avgFcp: '600.00',
+  stdDevFcp: '20.00',
+  avgCls: '0.0100',
+  avgTtfb: '120.00',
+  stdDevTtfb: '5.00',
+  avgPageSize: '150.00',
+  stdDevPageSize: '5.00',
+  avgDecodedSize: '400.00',
+  avgCssSize: '25.00',
+  stdDevCssSize: '2.00',
+  avgJsSize: '75.00',
+  stdDevJsSize: '8.00',
+  ...overrides,
+});
+
 describe('generateHtmlReport', () => {
   it('should include CSS and JS size columns in the HTML report', () => {
     const mockResults = [
@@ -77,28 +99,6 @@ describe('generateHtmlReport', () => {
 });
 
 describe('generateHtmlReport - Core Web Vitals', () => {
-  const result = (overrides) => ({
-    name: 'Test Page',
-    url: 'http://example.com',
-    avgLoadTime: '250.00',
-    stdDevLoadTime: '10.00',
-    avgLcp: '1800.00',
-    stdDevLcp: '50.00',
-    avgFcp: '600.00',
-    stdDevFcp: '20.00',
-    avgCls: '0.0100',
-    avgTtfb: '120.00',
-    stdDevTtfb: '5.00',
-    avgPageSize: '150.00',
-    stdDevPageSize: '5.00',
-    avgDecodedSize: '400.00',
-    avgCssSize: '25.00',
-    stdDevCssSize: '2.00',
-    avgJsSize: '75.00',
-    stdDevJsSize: '8.00',
-    ...overrides,
-  });
-
   it('should render the vitals columns and their data', () => {
     const html = generateHtmlReport([result()]);
 
@@ -157,6 +157,71 @@ describe('generateHtmlReport - Core Web Vitals', () => {
     assert.ok(
       html.includes('Mobile 4G (Pixel 7, 1.6 Mbps, 150 ms RTT, 4x CPU)'),
       'Report should state the throttling profile',
+    );
+  });
+
+  it('should flag CLS against Google thresholds', () => {
+    assert.ok(
+      generateHtmlReport([result({ avgCls: '0.05' })]).includes(
+        'td class="good"',
+      ),
+      'CLS at or under 0.1 should be marked good',
+    );
+    assert.ok(
+      generateHtmlReport([result({ avgCls: '0.18' })]).includes(
+        'td class="needs-work"',
+      ),
+      'CLS between 0.1 and 0.25 should be marked as needing work',
+    );
+    assert.ok(
+      generateHtmlReport([result({ avgCls: '0.4' })]).includes(
+        'td class="poor"',
+      ),
+      'CLS over 0.25 should be marked poor',
+    );
+    assert.ok(
+      generateHtmlReport([result({ avgCls: '0' })]).includes('td class="good"'),
+      'A CLS of exactly 0 is a good score, not missing data',
+    );
+  });
+});
+
+describe('generateHtmlReport - escaping', () => {
+  it('should escape a hostile page name instead of injecting it', () => {
+    const html = generateHtmlReport([
+      result({ name: '<script>alert(1)</script>' }),
+    ]);
+    assert.ok(
+      !html.includes('<script>alert(1)</script>'),
+      'Report must not contain a live script tag from the page name',
+    );
+    assert.ok(
+      html.includes('&lt;script&gt;alert(1)&lt;/script&gt;'),
+      'Report should contain the escaped page name',
+    );
+  });
+
+  it('should escape a hostile lcpUrl read from the page DOM', () => {
+    const html = generateHtmlReport([
+      result({ lcpUrl: '"><img src=x onerror=alert(3)>' }),
+    ]);
+    assert.ok(
+      !html.includes('<img src=x onerror=alert(3)>'),
+      'Report must not contain a live img tag from lcpUrl',
+    );
+    assert.ok(
+      html.includes('&quot;&gt;&lt;img src=x onerror=alert(3)&gt;'),
+      'Report should contain the escaped lcpUrl',
+    );
+  });
+
+  it('should escape a hostile url used in the link href', () => {
+    const html = generateHtmlReport([
+      result({ url: '"><script>alert(2)</script>' }),
+    ]);
+    assert.ok(
+      !html.includes('"><script>alert(2)</script>'),
+      'Report must not contain a live script tag from the url',
     );
   });
 });

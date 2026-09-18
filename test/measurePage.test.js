@@ -1,8 +1,10 @@
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert');
 const { chromium } = require('playwright');
-const { measurePage } = require('../benchmark.js');
+const { measurePage, getProfile } = require('../benchmark.js');
 const { createTestServer } = require('./testServer');
+
+const BYTES_PER_KB = 1024;
 
 describe('measurePage', () => {
   let browser;
@@ -114,6 +116,58 @@ describe('measurePage - vitals and throttling', () => {
       assert.ok(result.pageSize > 0, 'transfer size should be recorded');
     } finally {
       await page.close();
+    }
+  });
+
+  it('should match the bytes the server actually put on the wire', async () => {
+    // Ground truth, not a threshold: a threshold cannot tell an under-count
+    // from a correct count. Transfer size used to be summed from
+    // Network.dataReceived, whose encodedDataLength is a running estimate -
+    // it under-reported this fixture by ~35% and reported 0 KB of CSS against
+    // a real site. Comparing against the socket bytes the server wrote is the
+    // only check that catches the number drifting off reality again.
+    //
+    // Headers, the favicon 404 the browser requests unprompted, and
+    // connection reuse all move the total a little, so 15% separates a
+    // correct count from the bug comfortably without being flaky.
+    const TOLERANCE = 0.15;
+
+    // bytesWritten is live on an open socket and final on a closed one, so the
+    // live set has to be added to the closed total, not replace it.
+    let closedBytes = 0;
+    const openSockets = new Set();
+    const onConnection = (socket) => {
+      openSockets.add(socket);
+      socket.on('close', () => {
+        closedBytes += socket.bytesWritten;
+        openSockets.delete(socket);
+      });
+    };
+    server.on('connection', onConnection);
+    const bytesSent = () =>
+      closedBytes +
+      [...openSockets].reduce(
+        (total, socket) => total + socket.bytesWritten,
+        0,
+      );
+
+    const page = await browser.newPage();
+    try {
+      const before = bytesSent();
+      const result = await measurePage(page, serverUrl, {
+        ...getProfile('unthrottled'),
+        ...FAST_SETTLE,
+      });
+      const actualKb = (bytesSent() - before) / BYTES_PER_KB;
+
+      const drift = Math.abs(result.pageSize - actualKb) / actualKb;
+      assert.ok(
+        drift <= TOLERANCE,
+        `measured transfer ${result.pageSize.toFixed(2)} KB but the server sent ${actualKb.toFixed(2)} KB (${(drift * 100).toFixed(0)}% off) - transfer size is coming from the wrong source`,
+      );
+    } finally {
+      await page.close();
+      server.off('connection', onConnection);
     }
   });
 

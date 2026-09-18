@@ -137,7 +137,7 @@ async function getUrls(directory = __dirname) {
     .split('\n')
     .map((line) => {
       const [name, url] = line.split(',');
-      return { name, url };
+      return { name: name?.trim(), url: url?.trim() };
     })
     .filter((item) => item.name && item.url);
 }
@@ -184,8 +184,21 @@ async function measurePage(page, url, profile) {
     responseMap.set(event.requestId, event.response);
   });
 
+  // dataLength (decoded) is accurate per chunk, but encodedDataLength on
+  // dataReceived is a running estimate that CDP revises as compression stats
+  // firm up - it can under- or over-count, and for a cached/0-byte-chunk
+  // response like a render-blocking stylesheet it can come out as 0 entirely.
+  // loadingFinished reports the final, authoritative encoded size once the
+  // request is done, so transfer/css/js totals are taken from there instead.
+  // The trade-off: a request still in flight when the settle window closes, or
+  // one that errors out, never fires loadingFinished and so contributes zero
+  // rather than a partial count. That undercounts a page still loading at the
+  // end of the window, which is the rarer and more visible failure.
   client.on('Network.dataReceived', (event) => {
     decodedSize += event.dataLength;
+  });
+
+  client.on('Network.loadingFinished', (event) => {
     transferSize += event.encodedDataLength;
 
     const response = responseMap.get(event.requestId);
@@ -211,7 +224,15 @@ async function measurePage(page, url, profile) {
       new PerformanceObserver((list) => {
         const last = list.getEntries().at(-1);
         window.__vitals.lcp = last.startTime;
-        window.__vitals.lcpUrl = last.url || last.element?.tagName || '';
+        if (last.url) {
+          window.__vitals.lcpUrl = last.url;
+        } else {
+          // A text LCP element has no url; the tag name alone ("P", "H1") is
+          // useless for finding it on the page, so tack on a text snippet.
+          const tag = last.element?.tagName || '';
+          const text = last.element?.textContent?.trim().slice(0, 60) || '';
+          window.__vitals.lcpUrl = text ? `${tag} "${text}"` : tag;
+        }
       }).observe({ type: 'largest-contentful-paint', buffered: true });
 
       new PerformanceObserver((list) => {
@@ -313,7 +334,11 @@ async function benchmarkUrl(browser, name, url, profile) {
     }
   }
 
-  return { ...calculateStats(samples), lcpUrl };
+  return {
+    ...calculateStats(samples),
+    lcpUrl,
+    sampleCount: samples.pageLoadTime.length,
+  };
 }
 
 /**
@@ -386,6 +411,16 @@ function generateHtmlReport(runsOrResults, profile) {
       ? runsOrResults
       : [{ profile, results: runsOrResults || [] }];
 
+  // Untrusted input lands here: result.name/url come from links.txt, and
+  // lcpUrl is read out of the measured page's own DOM.
+  const escapeHtml = (str) =>
+    String(str)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+
   // LCP thresholds are Google's: good under 2.5s, poor over 4s.
   const lcpClass = (ms) => {
     const value = Number(ms);
@@ -395,19 +430,29 @@ function generateHtmlReport(runsOrResults, profile) {
     return 'poor';
   };
 
+  // CLS thresholds are Google's too: good at or under 0.1, poor above 0.25.
+  // Unlike LCP, 0 is a real (good) score here, not a sign of missing data.
+  const clsClass = (value) => {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return '';
+    if (num <= 0.1) return 'good';
+    if (num <= 0.25) return 'needs-work';
+    return 'poor';
+  };
+
   const renderRows = (results) =>
     results
       .map(
         (result) => `
         <tr>
-            <td><a href="${result.url}" target="_blank">${result.name}</a></td>
+            <td><a href="${escapeHtml(result.url)}" target="_blank">${escapeHtml(result.name)}</a></td>
             <td class="${lcpClass(result.avgLcp)}">${result.avgLcp} ms &plusmn; ${result.stdDevLcp}${
               result.lcpUrl
-                ? `<br><span class="hint">${result.lcpUrl}</span>`
+                ? `<br><span class="hint">${escapeHtml(result.lcpUrl)}</span>`
                 : ''
             }</td>
             <td>${result.avgFcp} ms &plusmn; ${result.stdDevFcp}</td>
-            <td>${result.avgCls}</td>
+            <td class="${clsClass(result.avgCls)}">${result.avgCls}</td>
             <td>${result.avgTtfb} ms &plusmn; ${result.stdDevTtfb}</td>
             <td>${result.avgLoadTime} ms &plusmn; ${result.stdDevLoadTime}</td>
             <td>${result.avgPageSize} KB &plusmn; ${result.stdDevPageSize}<br><span class="hint">${result.avgDecodedSize} KB decoded</span></td>
@@ -503,18 +548,22 @@ async function main(directory = __dirname) {
   const urls = await getUrls(directory);
   if (urls.length === 0) {
     console.log('No URLs to benchmark. Exiting.');
-    return;
+    return { reportPath: null, failedUrls: [] };
   }
 
   const profiles = getProfiles();
   const browser = await chromium.launch();
   const runs = [];
+  const failedUrls = [];
 
   for (const profile of profiles) {
     console.log(`\nProfile: ${profile.label}`);
     const results = [];
     for (const { name, url } of urls) {
       const result = await benchmarkUrl(browser, name, url, profile);
+      if (result.sampleCount === 0) {
+        failedUrls.push(`${name} (${url}) on ${profile.name}`);
+      }
       results.push({ name, url, ...result });
     }
     runs.push({ profile, results });
@@ -527,20 +576,34 @@ async function main(directory = __dirname) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const reportPath = path.join(directory, `results-${timestamp}.html`);
 
-  try {
-    await fs.writeFile(reportPath, htmlReport);
-    console.log(`Report saved to ${reportPath}`);
-    console.log('To view the report, open the HTML file in your browser.');
-  } catch (error) {
-    console.error(`Error writing report to ${reportPath}:`, error);
+  // No catch here on purpose: a returned reportPath has to mean the file is
+  // there. Swallowing the error handed the caller a path to nothing.
+  await fs.writeFile(reportPath, htmlReport);
+  console.log(`Report saved to ${reportPath}`);
+  console.log('To view the report, open the HTML file in your browser.');
+
+  // Every run of a URL failing (bad link, site down) is not the same as one
+  // flaky run - the per-run catch in benchmarkUrl already absorbs those. The
+  // report above still gets written so what did succeed isn't lost, but this
+  // is an expected outcome the caller has to see, not a crash: returning it
+  // lets the CLI exit non-zero without a library caller having to parse an
+  // error message to tell "some sites are down" from "the tool broke".
+  if (failedUrls.length > 0) {
+    console.error(`No successful runs for: ${failedUrls.join(', ')}`);
   }
+
+  return { reportPath, failedUrls };
 }
 
 if (require.main === module) {
-  main(__dirname).catch((error) => {
-    console.error('An unexpected error occurred:', error);
-    process.exit(1);
-  });
+  main(__dirname)
+    .then(({ failedUrls }) => {
+      if (failedUrls.length > 0) process.exit(1);
+    })
+    .catch((error) => {
+      console.error('An unexpected error occurred:', error);
+      process.exit(1);
+    });
 }
 
 module.exports = {
