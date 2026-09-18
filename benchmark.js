@@ -6,6 +6,10 @@ const path = require('node:path');
 const NUM_RUNS = 3;
 const BYTES_PER_KB = 1024;
 
+// Widest a waterfall resource name may print before it is cut, so the fixed
+// columns to its left stay aligned.
+const NAME_WIDTH = 44;
+
 /**
  * How long to keep observing after load before reading the metrics.
  *
@@ -21,6 +25,15 @@ const BYTES_PER_KB = 1024;
 // Read per call, not at require time: a test that sets the env var after
 // importing this module would otherwise still get the 4000 ms default.
 const settleMs = () => Number(process.env.BENCHMARK_SETTLE_MS) || 4000;
+
+/**
+ * Whether to print the per-resource waterfall to stdout.
+ *
+ * Off by default: a run is URLs x profiles, and a full waterfall each would
+ * bury the summary table it exists to explain. The report always carries it,
+ * so nothing is lost by leaving this off.
+ */
+const showWaterfall = () => process.env.BENCHMARK_WATERFALL === '1';
 
 /**
  * Throttling profiles.
@@ -143,6 +156,77 @@ async function getUrls(directory = __dirname) {
 }
 
 /**
+ * Turn raw CDP request records into a waterfall, sorted by start time.
+ *
+ * The shape of the result is the point: a flat block means a shared pipe with
+ * no prioritisation, a staircase means priority is being honoured, and LCP
+ * alone cannot tell those apart. Timings come from CDP rather than the Resource
+ * Timing API because the latter zeroes `transferSize` cross-origin. Both
+ * choices are explained in full under "The per-resource waterfall" in README.md.
+ *
+ * @param {Map<string, object>} records Per-requestId records.
+ * @param {number} t0 Monotonic timestamp (seconds) to treat as time zero.
+ * @returns {Array<object>} Entries with name, type, start, end, kb and failed.
+ */
+function buildWaterfall(records, t0) {
+  if (!Number.isFinite(t0)) return [];
+
+  const ms = (timestamp) =>
+    Number.isFinite(timestamp) ? Math.round((timestamp - t0) * 1000) : null;
+
+  // The basename is enough to recognise an asset and keeps the column readable;
+  // query strings and fragments are cache-busting noise. Taking the basename off
+  // `pathname` drops both, and stops a query holding a path (`?next=/a/b`) from
+  // supplying the basename. The base makes a relative URL parseable and is
+  // ignored for the absolute ones CDP actually reports. A URL with no basename
+  // at all - an origin root - falls back to the URL itself.
+  const label = (url = '') =>
+    (URL.parse(url, 'http://base')?.pathname.split('/').pop() || url).slice(
+      0,
+      NAME_WIDTH,
+    );
+
+  return [...records.values()]
+    .filter((record) => Number.isFinite(record.start))
+    .map((record) => ({
+      name: label(record.url),
+      type: record.type || 'Other',
+      start: ms(record.start),
+      end: ms(record.end),
+      kb: Math.round((record.encodedDataLength || 0) / BYTES_PER_KB),
+      failed: Boolean(record.failed),
+    }))
+    .sort((a, b) => a.start - b.start || (a.end ?? 0) - (b.end ?? 0));
+}
+
+/**
+ * Render a waterfall as fixed-width text.
+ *
+ * @param {Array<object>} waterfall Entries from buildWaterfall.
+ * @returns {string} The rendered table, or '' when there is nothing to show.
+ */
+function formatWaterfall(waterfall) {
+  if (!waterfall || waterfall.length === 0) return '';
+
+  const lines = ['    start    end     kb  type          resource'];
+  for (const entry of waterfall) {
+    // A request that never finished - still in flight when the settle window
+    // closed, or failed outright - has no end. Saying so beats printing a
+    // number that implies it completed.
+    const end = entry.failed
+      ? 'FAIL'
+      : entry.end === null
+        ? '...'
+        : String(entry.end);
+    lines.push(
+      `    ${String(entry.start).padStart(5)}  ${end.padStart(5)}  ` +
+        `${String(entry.kb).padStart(5)}  ${String(entry.type).padEnd(12)}  ${entry.name}`,
+    );
+  }
+  return lines.join('\n');
+}
+
+/**
  * Measures the load time and page size of a given URL.
  * @param {import('playwright').Page} page The Playwright page object.
  * @param {string} url The URL to measure.
@@ -178,10 +262,70 @@ async function measurePage(page, url, profile) {
   let decodedSize = 0;
   let cssSize = 0;
   let jsSize = 0;
-  const responseMap = new Map();
+
+  // One record per request, keyed by requestId, so the start, the response and
+  // the final byte count converge on a single entry. Both the css/js split and
+  // the waterfall read from here; a second parallel map would be two places to
+  // keep in sync and two chances for them to disagree about the same request.
+  const records = new Map();
+  let t0;
+  let redirectSeq = 0;
+
+  client.on('Network.requestWillBeSent', (event) => {
+    // The document request is time zero, matching what Resource Timing's
+    // startTime is relative to. A redirect re-fires this for the same
+    // requestId, but the first timestamp is still the navigation's start.
+    if (t0 === undefined) t0 = event.timestamp;
+
+    const existing = records.get(event.requestId);
+
+    // A redirect hop shares the requestId of the request that follows it and
+    // never fires loadingFinished, so it has to be closed out here under a key
+    // of its own. Letting the destination inherit the hop's start instead
+    // hides the hop entirely and charges its latency to the destination, which
+    // then reads as slow delivery rather than an extra round trip.
+    if (event.redirectResponse && existing) {
+      const bytes = event.redirectResponse.encodedDataLength || 0;
+      transferSize += bytes;
+      records.set(`${event.requestId}:redirect:${redirectSeq++}`, {
+        ...existing,
+        url: event.redirectResponse.url || existing.url,
+        end: event.timestamp,
+        encodedDataLength: bytes,
+      });
+    }
+
+    records.set(event.requestId, {
+      url: event.request?.url || existing?.url || '',
+      type: event.type || existing?.type,
+      start: event.redirectResponse
+        ? event.timestamp
+        : (existing?.start ?? event.timestamp),
+    });
+  });
 
   client.on('Network.responseReceived', (event) => {
-    responseMap.set(event.requestId, event.response);
+    // A response for a request we never saw start still has to be recorded, or
+    // its bytes drop out of the css/js split. It has no start, so buildWaterfall
+    // filters it out of the waterfall by itself.
+    const record = records.get(event.requestId) ?? {};
+    // responseReceived carries the resolved resource type, which is more
+    // reliable than the one guessed at request time.
+    record.type = event.type || record.type;
+    record.url = event.response?.url || record.url;
+    record.response = event.response;
+    records.set(event.requestId, record);
+  });
+
+  // A request that errors out never fires loadingFinished. Dropping it would
+  // leave a hole in the waterfall that reads as "this asset was not requested"
+  // rather than "this asset failed", which is the opposite conclusion.
+  client.on('Network.loadingFailed', (event) => {
+    const record = records.get(event.requestId);
+    if (record) {
+      record.failed = true;
+      record.end = event.timestamp;
+    }
   });
 
   // dataLength (decoded) is accurate per chunk, but encodedDataLength on
@@ -201,7 +345,13 @@ async function measurePage(page, url, profile) {
   client.on('Network.loadingFinished', (event) => {
     transferSize += event.encodedDataLength;
 
-    const response = responseMap.get(event.requestId);
+    const record = records.get(event.requestId);
+    if (record) {
+      record.end = event.timestamp;
+      record.encodedDataLength = event.encodedDataLength;
+    }
+
+    const response = record?.response;
     if (response) {
       const responseUrl = response.url;
       const mimeType = response.mimeType || '';
@@ -276,6 +426,7 @@ async function measurePage(page, url, profile) {
     decodedSize: decodedSize / BYTES_PER_KB,
     cssSize: cssSize / BYTES_PER_KB,
     jsSize: jsSize / BYTES_PER_KB,
+    waterfall: buildWaterfall(records, t0),
   };
 }
 
@@ -301,6 +452,10 @@ async function benchmarkUrl(browser, name, url, profile) {
     jsSize: [],
   };
   let lcpUrl = '';
+  // Kept from the last measured run rather than averaged: the point of the
+  // waterfall is its shape, and averaging start/end times across runs smears
+  // exactly the detail worth seeing. The last run is also the warmest.
+  let waterfall = [];
 
   const contextOptions = profile?.device ? { ...devices[profile.device] } : {};
 
@@ -326,6 +481,7 @@ async function benchmarkUrl(browser, name, url, profile) {
           samples[key].push(result[key]);
         }
         lcpUrl = result.lcpUrl || lcpUrl;
+        waterfall = result.waterfall || waterfall;
       }
     } catch (error) {
       console.error(`  Error during run ${i} for ${name} (${url}):`, error);
@@ -334,9 +490,18 @@ async function benchmarkUrl(browser, name, url, profile) {
     }
   }
 
+  if (showWaterfall() && waterfall.length > 0) {
+    console.log(
+      `\n  Waterfall - ${name}, last run, ms from navigation start:\n`,
+    );
+    console.log(formatWaterfall(waterfall));
+    console.log('');
+  }
+
   return {
     ...calculateStats(samples),
     lcpUrl,
+    waterfall,
     sampleCount: samples.pageLoadTime.length,
   };
 }
@@ -440,6 +605,20 @@ function generateHtmlReport(runsOrResults, profile) {
     return 'poor';
   };
 
+  // The waterfall is wide and only wanted when a number looks wrong, so it sits
+  // in a collapsed row rather than a column. Resource names come off the
+  // measured page, so they are escaped like every other untrusted value here.
+  const renderWaterfallRow = (result) => {
+    if (!result.waterfall || result.waterfall.length === 0) return '';
+    return `
+        <tr class="waterfall-row"><td colspan="9">
+            <details>
+                <summary>Waterfall &mdash; ${result.waterfall.length} requests, last run</summary>
+                <pre>${escapeHtml(formatWaterfall(result.waterfall))}</pre>
+            </details>
+        </td></tr>`;
+  };
+
   const renderRows = (results) =>
     results
       .map(
@@ -458,7 +637,7 @@ function generateHtmlReport(runsOrResults, profile) {
             <td>${result.avgPageSize} KB &plusmn; ${result.stdDevPageSize}<br><span class="hint">${result.avgDecodedSize} KB decoded</span></td>
             <td>${result.avgCssSize} KB &plusmn; ${result.stdDevCssSize}</td>
             <td>${result.avgJsSize} KB &plusmn; ${result.stdDevJsSize}</td>
-        </tr>
+        </tr>${renderWaterfallRow(result)}
     `,
       )
       .join('');
@@ -520,6 +699,9 @@ function generateHtmlReport(runsOrResults, profile) {
             .hint { font-size: 0.8em; color: #777; }
             h2 { color: #0056b3; font-size: 1.1em; margin-top: 35px; }
             .note { margin-top: 30px; padding: 15px; background: #f0f6ff; border-left: 4px solid #0056b3; font-size: 0.9em; }
+            .waterfall-row td { padding: 0; border-top: none; background: #fff; }
+            .waterfall-row summary { cursor: pointer; padding: 8px 15px; font-size: 0.85em; color: #0056b3; }
+            .waterfall-row pre { margin: 0; padding: 12px 15px; overflow-x: auto; font-size: 0.78em; line-height: 1.45; background: #fafafa; border-top: 1px solid #eee; }
             td.good { background-color: #e6f4ea; }
             td.needs-work { background-color: #fef7e0; }
             td.poor { background-color: #fce8e6; }
@@ -608,6 +790,8 @@ if (require.main === module) {
 
 module.exports = {
   getUrls,
+  buildWaterfall,
+  formatWaterfall,
   getProfile,
   getProfiles,
   PROFILES,

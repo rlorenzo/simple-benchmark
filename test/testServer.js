@@ -39,6 +39,13 @@ document.addEventListener('DOMContentLoaded', function () {
  */
 function createTestServer() {
   const server = http.createServer((req, res) => {
+    // A redirect chain to measure the waterfall against; the hops have to show
+    // up as their own rows rather than folding into the destination.
+    if (req.url === '/old') {
+      res.writeHead(302, { Location: '/' }).end();
+      return;
+    }
+
     const route = ROUTES[req.url];
     if (!route) {
       res.writeHead(404).end();

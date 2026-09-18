@@ -63,6 +63,61 @@ and optimising it leads to different work than optimising LCP.
     just-restarted PHP worker — and that outlier would otherwise dominate a
     three-run mean.
 
+## The per-resource waterfall
+
+Every run records a waterfall: each request's start, end, transferred bytes and
+resource type, in start order. It is in the HTML report under each page, behind
+a collapsed **Waterfall** row. To print it to stdout as well:
+
+```bash
+BENCHMARK_WATERFALL=1 node benchmark.js
+```
+
+It is off by default because a run is URLs x profiles, and a full waterfall for
+each would bury the summary table it exists to explain.
+
+### What it is for
+
+The summary metrics say a page is slow. The waterfall says *which kind* of slow,
+and that changes what you do about it:
+
+```text
+    start    end     kb  type          resource
+        0    281     12  Document      https://example.com/
+      248   2214     83  Image         hero-1280x0.jpg
+      252   1138     24  Stylesheet    style.css
+      276   1761     24  Font          Reckless-Regular.woff2
+      332   2391     42  Script        swiper.bundle.js
+```
+
+Everything starts within ~90 ms of everything else and they all finish together.
+That flat block is the signature of a **shared pipe with no prioritisation** —
+HTTP/1.1, which caps at ~6 connections per origin and has no stream priority. A
+`fetchpriority="high"` hint on that hero has no mechanism to act through, so the
+LCP image finishes last despite being the one thing that matters.
+
+A staircase means the opposite: priority is being honoured, and the fix is to
+remove bytes rather than to change transport.
+
+Neither shape is visible in LCP alone.
+
+### Why the timings come from CDP
+
+`PerformanceResourceTiming.transferSize` reads **0** for cross-origin responses
+that lack a `Timing-Allow-Origin` header. A page pulling fonts or scripts from a
+CDN would silently under-report exactly the resources competing with its LCP
+element. CDP reports the real encoded bytes regardless of origin, so the
+waterfall and the page-weight totals agree.
+
+A request that fails, or is still in flight when the settle window closes, is
+kept and marked `FAIL` or `...` rather than dropped — an absent row reads as
+"never requested", which is the opposite conclusion from "requested and failed".
+
+Each hop of a redirect chain gets its own row for the same reason. A hop shares
+its request id with the response that follows it, so folding the two together
+would hide the hop and charge its round trip to the destination — which then
+reads as a slow response rather than the extra redirect it actually is.
+
 ## Throttling profiles
 
 | Profile | What it emulates |

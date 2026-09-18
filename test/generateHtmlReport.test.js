@@ -224,4 +224,66 @@ describe('generateHtmlReport - escaping', () => {
       'Report must not contain a live script tag from the url',
     );
   });
+
+  it('should escape a hostile resource name in the waterfall', () => {
+    // Resource names come off the measured page, so they are as untrusted as
+    // the page name and the lcpUrl above.
+    const html = generateHtmlReport([
+      result({
+        waterfall: [
+          {
+            name: '<script>alert(4)</script>',
+            type: 'Script',
+            start: 0,
+            end: 10,
+            kb: 1,
+            failed: false,
+          },
+        ],
+      }),
+    ]);
+    assert.ok(
+      !html.includes('<script>alert(4)</script>'),
+      'Report must not contain a live script tag from a resource name',
+    );
+    assert.ok(
+      html.includes('&lt;script&gt;alert(4)&lt;/script&gt;'),
+      'Report should contain the escaped resource name',
+    );
+  });
+});
+
+describe('generateHtmlReport - waterfall row', () => {
+  it('should render a collapsed waterfall row under the page row', () => {
+    const html = generateHtmlReport([
+      result({
+        waterfall: [
+          {
+            name: 'styles.css',
+            type: 'Stylesheet',
+            start: 12,
+            end: 340,
+            kb: 24,
+            failed: false,
+          },
+        ],
+      }),
+    ]);
+
+    assert.ok(html.includes('<details>'), 'Waterfall should be collapsible');
+    assert.ok(
+      html.includes('Waterfall &mdash; 1 requests, last run'),
+      'Summary should count the requests',
+    );
+    assert.ok(html.includes('styles.css'), 'Row should list the resource');
+  });
+
+  it('should omit the row entirely when there is no waterfall', () => {
+    // An empty waterfall means the run recorded nothing, which an empty
+    // collapsed row would misreport as "expand me, there is data here".
+    assert.ok(!generateHtmlReport([result({})]).includes('<details>'));
+    assert.ok(
+      !generateHtmlReport([result({ waterfall: [] })]).includes('<details>'),
+    );
+  });
 });
