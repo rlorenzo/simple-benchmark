@@ -197,4 +197,75 @@ describe('measurePage - vitals and throttling', () => {
       await slowPage.close();
     }
   });
+
+  it('should record every request in the waterfall, document first', async () => {
+    // The CDP wiring behind the waterfall is only exercised against a real
+    // browser: the unit tests feed buildWaterfall synthetic records, so nothing
+    // else catches a renamed event field or a handler that stops firing.
+    const page = await browser.newPage();
+    try {
+      const { waterfall, pageSize } = await measurePage(
+        page,
+        serverUrl,
+        FAST_SETTLE,
+      );
+
+      assert.deepStrictEqual(
+        waterfall.map((entry) => entry.name),
+        // The document is an origin root, which has no basename to label it by.
+        [`${serverUrl}/`, 'styles.css', 'script.js'],
+        'every request should appear, in start order, document first',
+      );
+      assert.strictEqual(waterfall[0].type, 'Document');
+      assert.strictEqual(waterfall[0].start, 0, 'document starts at time zero');
+
+      for (const entry of waterfall) {
+        assert.strictEqual(
+          entry.failed,
+          false,
+          `${entry.name} should not fail`,
+        );
+        assert.ok(
+          entry.end >= entry.start,
+          `${entry.name} should not finish before it starts`,
+        );
+      }
+
+      // The waterfall and the page-weight total are read off the same records,
+      // so they have to agree about how many bytes arrived.
+      const waterfallKb = waterfall.reduce((sum, entry) => sum + entry.kb, 0);
+      assert.ok(
+        Math.abs(waterfallKb - pageSize) <= waterfall.length,
+        `waterfall total (${waterfallKb} KB) should match page size (${pageSize} KB) within per-row rounding`,
+      );
+    } finally {
+      await page.close();
+    }
+  });
+
+  it('should show each redirect hop as its own row', async () => {
+    const page = await browser.newPage();
+    try {
+      const { waterfall } = await measurePage(
+        page,
+        `${serverUrl}/old`,
+        FAST_SETTLE,
+      );
+
+      const documents = waterfall.filter((entry) => entry.type === 'Document');
+      assert.deepStrictEqual(
+        documents.map((entry) => entry.name),
+        // The destination is an origin root, which has no basename to label it by.
+        ['old', `${serverUrl}/`],
+        'the redirect hop and its destination should be separate rows',
+      );
+      assert.strictEqual(documents[0].start, 0, 'the hop starts at time zero');
+      assert.ok(
+        documents[1].start >= documents[0].end,
+        'the destination starts when the hop ends, not at time zero',
+      );
+    } finally {
+      await page.close();
+    }
+  });
 });
